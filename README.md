@@ -1,114 +1,150 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# EmpHrx — Backend Architecture & Attendance Engine
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+> **Core Stack**: NestJS (v12) + Fastify + PostgreSQL + Prisma ORM + Redis + BullMQ + Swagger  
+> **Production Architecture**: Unified Multi-Method Capture Pipeline, Redis-Backed Ephemeral QR Session Engine, Transactional Outbox Pattern, and BullMQ Asynchronous Calculation Workers.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+---
 
-## Description
+## 1. Architecture Overview
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+EmpHrx provides a unified attendance management platform designed for diverse organizational archetypes:
+1. **Office / Reception Displays**: Dynamic rotating QR codes generated on tablet/kiosk displays with 30-second TTL and single-use cryptographic nonces.
+2. **Mobile GPS Geofencing**: Geofence boundary checks (Haversine distance) with mock-location mitigations for field, remote, and hybrid staff.
+3. **Biometric Terminals**: HMAC-signed webhook log ingestion for hardware terminals (eSSL, ZKTeco).
+4. **Administrative Overrides**: Manual punch adjustments, regularizations, and WFH tracking with immutable audit trails.
 
-## Project setup
+### Architectural Principles
+* **Single Capture Gateway (`AttendanceCaptureService`)**: All punch methods share unified validation, tenant scoping, Redis debounce locking, and idempotency guarantees.
+* **Separation of Raw Events vs. Rollup State**:
+  * `attendance_punches`: Append-only, immutable physical event ledger.
+  * `attendance_records`: Materialized daily summaries (`firstCheckIn`, `lastCheckOut`, `totalWorkMinutes`, `lateMinutes`, `status`).
+* **Zero Synchronous Recalculation on Punch**: Ingestion persists the punch and inserts an `outbox_events` row inside a single ACID `$transaction` in < 50ms. A BullMQ worker (`attendance.calculate`) processes recalculations asynchronously.
+* **Ephemeral Data in Redis**: Dynamic QR tokens and nonces live exclusively in Redis with 30s TTL, eliminating database write bloat.
+* **Historical Shift Snapshots**: Shift parameters (`snapshotShiftCode`, `snapshotStartTime`, `snapshotEndTime`, `snapshotFullDayMins`, `snapshotGraceMins`) are snapshotted onto `attendance_records` so future policy changes never alter past attendance.
 
-```bash
-$ npm install
+---
+
+## 2. Directory Structure
+
+```
+emphrx-backend/
+├── prisma/
+│   └── schema.prisma                    /* Production PostgreSQL Prisma schema */
+├── src/
+│   ├── app.controller.ts
+│   ├── app.module.ts                    /* Root module registering Config, Prisma, Redis, Attendance */
+│   ├── app.service.ts
+│   ├── main.ts                          /* Fastify bootstrap, global validation, Swagger OpenAPI */
+│   ├── phase1-verify.ts                 /* Phase 1 end-to-end verification script */
+│   ├── common/
+│   │   └── redis/
+│   │       ├── redis.module.ts          /* Global Redis module */
+│   │       └── redis.service.ts         /* ioredis client, atomic debounce lock, Lua nonce script */
+│   ├── database/
+│   │   ├── prisma.module.ts             /* Global Prisma module */
+│   │   └── prisma.service.ts            /* PrismaClient lifecycle management */
+│   └── modules/
+│       └── attendance/
+│           ├── attendance.module.ts     /* Wires controllers, services, and queue worker */
+│           ├── controllers/
+│           │   ├── qr-attendance.controller.ts    /* Kiosk session, check-in, check-out */
+│           │   └── attendance.controller.ts       /* Manual punch, paginated list, daily view */
+│           ├── dto/
+│           │   ├── qr-session.dto.ts              /* Kiosk session request/response */
+│           │   ├── qr-punch.dto.ts                /* Mobile QR punch payload */
+│           │   ├── manual-punch.dto.ts            /* Admin manual entry payload */
+│           │   └── attendance-query.dto.ts        /* Filterable pagination query */
+│           ├── enums/
+│           │   └── attendance.enums.ts            /* PunchType, CaptureMethod, AttendanceStatus, etc. */
+│           ├── services/
+│           │   ├── attendance.service.ts          /* Multi-filter query and employee daily view */
+│           │   ├── attendance-capture.service.ts  /* UNIFIED INGESTION ENGINE (ACID + Lock + Outbox) */
+│           │   ├── attendance-calculation.service.ts /* DAILY ROLLUP CALCULATOR & SHIFT SNAPSHOTTER */
+│           │   └── qr/
+│           │       └── qr-session.service.ts      /* Dynamic JWT tokens & Redis ephemeral nonces */
+│           └── workers/
+│               └── attendance-queue.worker.ts     /* BullMQ worker & Transactional Outbox relay */
 ```
 
-## Compile and run the project
+---
 
-```bash
-# development
-$ npm run start
+## 3. Database Schema Design (Prisma)
 
-# watch mode
-$ npm run start:dev
+### Core Models
+| Table | Description |
+|---|---|
+| `organizations` | Tenant entity with plan tier (`FREE`, `STARTER`, `BUSINESS`, `ENTERPRISE`) and seat limits. |
+| `employees` | Employee profile scoped by tenant with composite unique `[orgId, email]` and `[orgId, employeeCode]`. |
+| `shifts` | Working shift hours, overnight flag (`isOvernight`), and grace windows. |
+| `attendance_settings` | Org-level work hours, half-day hours, weekly off-days (`weeklyOffDays`), and holiday linkages. |
+| `holidays` | Organizational holiday calendar records. |
+| `attendance_locations` | Office worksite coordinates, radius (meters), and enabled capture methods. |
+| `attendance_devices` | Hardware biometric terminals (serial number, IP, hashed API key/secret, status). |
+| `attendance_device_mappings` | Join relating employees to terminal-specific biometric enrollment IDs. |
+| `attendance_punches` | Immutable physical punch ledger with client `idempotencyKey` and `businessDate`. |
+| `attendance_records` | Aggregate daily summary with snapshotted shift policy values. |
+| `attendance_regularizations` | Correction requests with manager/HR approval pipeline. |
+| `attendance_wfh_requests` | Work From Home date range requests. |
+| `outbox_events` | Transactional outbox table consumed by BullMQ queue relay. |
+| `audit_logs` | Immutable audit trail for manual entries, overrides, and approvals. |
 
-# production mode
-$ npm run start:prod
+---
+
+## 4. API Endpoints & Swagger Documentation
+
+Interactive Swagger OpenAPI documentation is available locally at:
+👉 **`http://localhost:4000/api/docs`**
+
+### Active Endpoints
+
+#### Dynamic QR Attendance (`/api/attendance/qr`)
+* `POST /api/attendance/qr/session`: Kiosk displays request new dynamic QR session token (refreshes every 15–30s).
+* `POST /api/attendance/qr/check-in`: Mobile scans QR to clock in. Atomically consumes nonce via Redis Lua script.
+* `POST /api/attendance/qr/check-out`: Mobile scans QR to clock out.
+
+#### Attendance Management & Queries (`/api/attendance`)
+* `POST /api/attendance/manual`: HR/Admin manual punch exception (writes to `audit_logs`).
+* `GET /api/attendance`: Paginated query with filters (`startDate`, `endDate`, `employeeId`, `status`, `page`, `limit`).
+* `GET /api/attendance/:employeeId/:date`: Single employee day summary with punch timeline and snapshotted shift info.
+
+---
+
+## 5. Local Setup & Execution
+
+### 1. Prerequisites
+* **Node.js**: v22.x or later
+* **PostgreSQL**: v15+ running on port `5432`
+* **Redis**: v7+ running on port `6379`
+
+### 2. Environment Configuration
+Create or update `.env` in `emphrx-backend/`:
+```env
+PORT=4000
+DATABASE_URL="postgresql://postgres:admin123@localhost:5432/emphrx_db?schema=public"
+REDIS_HOST="127.0.0.1"
+REDIS_PORT=6379
+REDIS_PASSWORD=""
+QR_JWT_SECRET="emphrx_super_secure_qr_signing_secret_key_2026"
 ```
 
-## Run tests
-
+### 3. Install Dependencies & Generate Prisma Client
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm install
+npx prisma generate
+npx prisma db push
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
+### 4. Run End-to-End Phase 1 Verification Script
+Runs an end-to-end integration test creating a tenant, shift, employee, dynamic QR session in Redis, anti-replay attack test, outbox event verification, and async calculation rollup:
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run build
+node dist/phase1-verify.js
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observer](https://observer.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+### 5. Start Development Server
+```bash
+npm run start:dev
+```
+Access the application:
+* Base API: `http://localhost:4000/api`
+* Swagger Docs: `http://localhost:4000/api/docs`

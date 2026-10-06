@@ -1,0 +1,50 @@
+export enum PunchType {
+  CHECK_IN = 'CHECK_IN',
+  CHECK_OUT = 'CHECK_OUT',
+}
+
+export enum CaptureMethod {
+  QR_CODE = 'QR_CODE',
+  GEOLOCATION = 'GEOLOCATION',
+  BIOMETRIC_API = 'BIOMETRIC_API',
+  MANUAL_ADMIN = 'MANUAL_ADMIN',
+}
+
+export enum AttendanceStatus {
+  PRESENT = 'PRESENT',
+  HALF_DAY = 'HALF_DAY',
+  ABSENT = 'ABSENT',
+  ON_LEAVE = 'ON_LEAVE',
+  WORK_FROM_HOME = 'WORK_FROM_HOME',
+  HOLIDAY = 'HOLIDAY',
+  WEEK_OFF = 'WEEK_OFF',
+}
+
+export enum RequestStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum OrganizationTier {
+  FREE = 'FREE',
+  STARTER = 'STARTER',
+  BUSINESS = 'BUSINESS',
+  ENTERPRISE = 'ENTERPRISE',
+}
+
+export enum AuditAction {
+  CREATE = 'CREATE',
+  UPDATE = 'UPDATE',
+  DELETE = 'DELETE',
+  APPROVE = 'APPROVE',
+  REJECT = 'REJECT',
+  OVERRIDE = 'OVERRIDE',
+}
+
+export enum OutboxStatus {
+  PENDING = 'PENDING',
+  PROCESSED = 'PROCESSED',
+  FAILED = 'FAILED',
+}
