@@ -48,3 +48,18 @@ export enum OutboxStatus {
   PROCESSED = 'PROCESSED',
   FAILED = 'FAILED',
 }
+
+export enum DeviceType {
+  ZKTECO = 'ZKTECO',
+  ESSL = 'ESSL',
+  GENERIC_WEBHOOK = 'GENERIC_WEBHOOK',
+  FACE_RECOGNITION_KIOSK = 'FACE_RECOGNITION_KIOSK',
+}
+
+export enum DeviceStatus {
+  ONLINE = 'ONLINE',
+  OFFLINE = 'OFFLINE',
+  MAINTENANCE = 'MAINTENANCE',
+  DECOMMISSIONED = 'DECOMMISSIONED',
+}
+

@@ -12,6 +12,7 @@ import { AttendanceQueueWorker } from '../workers/attendance-queue.worker.js';
 import { QrPunchDto } from '../dto/qr-punch.dto.js';
 import { GeoPunchDto } from '../dto/geo-punch.dto.js';
 import { ManualPunchDto } from '../dto/manual-punch.dto.js';
+import { BiometricPunchLogDto } from '../dto/device.dto.js';
 import {
   AuditAction,
   CaptureMethod,
@@ -354,4 +355,187 @@ export class AttendanceCaptureService {
       message: 'Manual punch recorded successfully',
     };
   }
+
+  /* Captures batch biometric punches pushed from physical hardware terminals */
+  async captureBiometricBatch(
+    orgId: string,
+    deviceId: string,
+    logs: BiometricPunchLogDto[],
+  ): Promise<{
+    receivedCount: number;
+    processedCount: number;
+    duplicatesCount: number;
+    failedLogs: Array<{ logId: string; enrollmentId: string; reason: string }>;
+  }> {
+    if (!logs || logs.length === 0) {
+      return {
+        receivedCount: 0,
+        processedCount: 0,
+        duplicatesCount: 0,
+        failedLogs: [],
+      };
+    }
+
+    const enrollmentIds = [...new Set(logs.map((l) => l.enrollmentId))];
+    const logIds = [...new Set(logs.map((l) => l.logId))];
+
+    /* 1. Bulk lookup active employee mappings for device */
+    const mappings = await this.prisma.attendanceDeviceMapping.findMany({
+      where: {
+        deviceId,
+        biometricEnrollId: { in: enrollmentIds },
+        isActive: true,
+      },
+      include: {
+        employee: {
+          include: {
+            assignedShift: true,
+          },
+        },
+      },
+    });
+
+    const mappingMap = new Map<string, (typeof mappings)[0]>();
+    for (const m of mappings) {
+      mappingMap.set(m.biometricEnrollId, m);
+    }
+
+    /* 2. Deduplicate against existing raw log IDs for this device */
+    const existingPunches = await this.prisma.attendancePunch.findMany({
+      where: {
+        orgId,
+        deviceId,
+        rawLogId: { in: logIds },
+      },
+      select: { rawLogId: true },
+    });
+
+    const existingLogIds = new Set(
+      existingPunches.map((p) => p.rawLogId).filter(Boolean) as string[],
+    );
+
+    const punchesToCreate: Array<{
+      orgId: string;
+      employeeId: string;
+      businessDate: Date;
+      punchType: PunchType;
+      punchTime: Date;
+      captureMethod: CaptureMethod;
+      deviceId: string;
+      rawLogId: string;
+      idempotencyKey: string;
+      isVerified: boolean;
+      dateStr: string;
+    }> = [];
+
+    let duplicatesCount = 0;
+    const failedLogs: Array<{ logId: string; enrollmentId: string; reason: string }> = [];
+    const recalculationsToTrigger = new Map<string, { employeeId: string; businessDate: Date }>();
+
+    for (const log of logs) {
+      if (existingLogIds.has(log.logId)) {
+        duplicatesCount++;
+        continue;
+      }
+
+      const mapping = mappingMap.get(log.enrollmentId);
+      if (!mapping || !mapping.employee || mapping.employee.orgId !== orgId) {
+        failedLogs.push({
+          logId: log.logId,
+          enrollmentId: log.enrollmentId,
+          reason: `Unmapped biometric enrollment ID: ${log.enrollmentId}`,
+        });
+        continue;
+      }
+
+      const punchTime = new Date(log.timestamp);
+      if (isNaN(punchTime.getTime())) {
+        failedLogs.push({
+          logId: log.logId,
+          enrollmentId: log.enrollmentId,
+          reason: `Invalid timestamp format: ${log.timestamp}`,
+        });
+        continue;
+      }
+
+      const isOvernight = mapping.employee.assignedShift?.isOvernight ?? false;
+      const businessDate = this.resolveBusinessDate(punchTime, isOvernight);
+      const dateStr = businessDate.toISOString().split('T')[0];
+
+      punchesToCreate.push({
+        orgId,
+        employeeId: mapping.employee.id,
+        businessDate,
+        punchType: log.punchType,
+        punchTime,
+        captureMethod: CaptureMethod.BIOMETRIC_API,
+        deviceId,
+        rawLogId: log.logId,
+        idempotencyKey: `BIO:${deviceId}:${log.logId}`,
+        isVerified: true,
+        dateStr,
+      });
+
+      const recalcKey = `${mapping.employee.id}:${dateStr}`;
+      recalculationsToTrigger.set(recalcKey, {
+        employeeId: mapping.employee.id,
+        businessDate,
+      });
+    }
+
+    /* 3. Transactionally create punches and outbox events */
+    if (punchesToCreate.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const punch of punchesToCreate) {
+          const created = await tx.attendancePunch.create({
+            data: {
+              orgId: punch.orgId,
+              employeeId: punch.employeeId,
+              businessDate: punch.businessDate,
+              punchType: punch.punchType,
+              punchTime: punch.punchTime,
+              captureMethod: punch.captureMethod,
+              deviceId: punch.deviceId,
+              rawLogId: punch.rawLogId,
+              idempotencyKey: punch.idempotencyKey,
+              isVerified: punch.isVerified,
+            },
+          });
+
+          await tx.outboxEvent.create({
+            data: {
+              orgId: punch.orgId,
+              eventType: 'ATTENDANCE_PUNCHED',
+              aggregateId: created.id,
+              status: OutboxStatus.PENDING,
+              payload: {
+                punchId: created.id,
+                employeeId: punch.employeeId,
+                businessDate: punch.dateStr,
+                punchType: punch.punchType,
+                captureMethod: CaptureMethod.BIOMETRIC_API,
+              },
+            },
+          });
+        }
+      });
+
+      /* 4. Asynchronously enqueue calculation jobs */
+      for (const recalc of recalculationsToTrigger.values()) {
+        await this.queueWorker.enqueueCalculation(
+          orgId,
+          recalc.employeeId,
+          recalc.businessDate,
+        );
+      }
+    }
+
+    return {
+      receivedCount: logs.length,
+      processedCount: punchesToCreate.length,
+      duplicatesCount,
+      failedLogs,
+    };
+  }
 }
+

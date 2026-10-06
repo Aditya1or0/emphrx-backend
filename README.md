@@ -41,6 +41,7 @@ emphrx-backend/
 │   ├── main.ts                          /* Fastify bootstrap, Swagger OpenAPI, global filter & interceptor */
 │   ├── phase1-verify.ts                 /* Phase 1 integration verification script */
 │   ├── phase2-verify.ts                 /* Phase 2 integration verification script */
+│   ├── phase3-verify.ts                 /* Phase 3 integration verification script */
 │   ├── common/
 │   │   ├── filters/
 │   │   │   └── http-exception.filter.ts /* Global error catching & standard error envelope */
@@ -61,7 +62,8 @@ emphrx-backend/
 │           │   ├── attendance.controller.ts          /* Manual punch, query list, daily view */
 │           │   ├── regularization.controller.ts      /* Correction requests & manager approvals */
 │           │   ├── wfh.controller.ts                 /* WFH requests & manager approvals */
-│           │   └── attendance-setting.controller.ts  /* Organization attendance settings & rules */
+│           │   ├── attendance-setting.controller.ts  /* Organization attendance settings & rules */
+│           │   └── attendance-device.controller.ts   /* Hardware terminals & batch punch push */
 │           ├── dto/
 │           │   ├── qr-session.dto.ts
 │           │   ├── qr-punch.dto.ts
@@ -70,27 +72,35 @@ emphrx-backend/
 │           │   ├── regularization.dto.ts
 │           │   ├── wfh.dto.ts
 │           │   ├── attendance-setting.dto.ts
-│           │   └── attendance-query.dto.ts
+│           │   ├── attendance-query.dto.ts
+│           │   └── device.dto.ts                     /* Hardware terminal registration & batch DTOs */
 │           ├── enums/
 │           │   └── attendance.enums.ts
+│           ├── guards/
+│           │   └── device-hmac.guard.ts              /* Cryptographic HMAC-SHA256 signature guard */
 │           ├── repositories/
 │           │   ├── attendance-punch.repository.ts
 │           │   ├── attendance-record.repository.ts
 │           │   ├── attendance-location.repository.ts
 │           │   ├── attendance-regularization.repository.ts
 │           │   ├── attendance-wfh.repository.ts
-│           │   └── attendance-setting.repository.ts
+│           │   ├── attendance-setting.repository.ts
+│           │   └── attendance-device.repository.ts   /* Hardware terminal and enrollment mappings */
 │           ├── services/
-│           │   ├── attendance-capture.service.ts     /* UNIFIED INGESTION (QR, Geo, Manual) */
-│           │   ├── attendance-calculation.service.ts /* DAILY ROLLUP & SHIFT SNAPSHOT ENGINE */
+│           │   ├── attendance-capture.service.ts     /* UNIFIED INGESTION (QR, Geo, Bio, Manual) */
+│           │   ├── attendance-calculation.service.ts /* DAILY ROLLUP, OVERTIME & SHIFT SNAPSHOTS */
 │           │   ├── attendance.service.ts             /* Multi-filter query and employee daily view */
 │           │   ├── regularization.service.ts         /* Correction workflow & audit logging */
 │           │   ├── wfh.service.ts                    /* WFH workflow & punch reconciliation */
 │           │   ├── attendance-setting.service.ts     /* Org rules, off days, and grace limits */
+│           │   ├── attendance-device.service.ts      /* Physical terminal lifecycle & heartbeat */
+│           │   ├── attendance-webhook.service.ts     /* Outbound webhooks & signature dispatch */
 │           │   ├── qr/
 │           │   │   └── qr-session.service.ts         /* Dynamic QR tokens & Redis nonces */
 │           │   └── geolocation/
 │           │       └── geofence.service.ts           /* Haversine distance & accuracy checks */
+│           ├── utils/
+│           │   └── hmac.util.ts                      /* HMAC signature calculation & verification */
 │           └── workers/
 │               └── attendance-queue.worker.ts        /* BullMQ worker & Outbox relay */
 ```
@@ -134,6 +144,18 @@ Interactive Swagger documentation is available locally at:
 * `GET /api/attendance/settings`: Fetch working hours, half-day hours, grace periods, weekly off days.
 * `PUT /api/attendance/settings`: Update settings with audit logging.
 
+#### Biometric Hardware Terminals & Webhooks (`/api/attendance/devices`)
+* `POST /api/attendance/devices`: Register new hardware terminal (generates raw API key and stores SHA-256 hash).
+* `GET /api/attendance/devices`: List all registered terminals for tenant organization.
+* `GET /api/attendance/devices/:id`: Retrieve single device metadata and operational status.
+* `PATCH /api/attendance/devices/:id`: Update terminal parameters (ONLINE, OFFLINE, MAINTENANCE, IP).
+* `DELETE /api/attendance/devices/:id`: Decommission physical terminal.
+* `POST /api/attendance/devices/:id/mappings`: Map employee UUID to biometric enrollment ID on terminal.
+* `GET /api/attendance/devices/:id/mappings`: List all employee enrollment mappings for device.
+* `DELETE /api/attendance/devices/:id/mappings/:mappingId`: Remove employee biometric mapping.
+* `POST /api/attendance/devices/heartbeat`: Periodic terminal hardware ping updating status and heartbeat timestamp.
+* `POST /api/attendance/devices/punch` (and `/api/attendance/device/punch`): High-throughput batch punch push endpoint authenticated via HMAC-SHA256 signature (`x-signature`, `x-timestamp`, `x-device-serial`) with duplicate deduplication and unmapped enrollment log isolation.
+
 ---
 
 ## 4. Local Execution & Verification
@@ -150,6 +172,9 @@ node dist/phase1-verify.js
 
 # Phase 2 Verification (Geolocation, Geofence radius, Overnight Shifts, Regularization, WFH, Settings)
 node dist/phase2-verify.js
+
+# Phase 3 Verification (Biometric Terminals, HMAC Guard, Batch Ingestion, Overtime, Webhooks)
+node dist/phase3-verify.js
 ```
 
 ### 3. Start Development Server
@@ -158,3 +183,4 @@ npm run start:dev
 ```
 * Base URL: `http://localhost:4000/api`
 * Swagger UI: `http://localhost:4000/api/docs`
+

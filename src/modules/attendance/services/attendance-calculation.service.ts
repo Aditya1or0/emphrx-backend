@@ -136,13 +136,13 @@ export class AttendanceCalculationService {
       }
     }
 
-    /* 7. Evaluate Overtime */
+    /* 7. Evaluate Overtime using configurable policy thresholds */
     const overtimeThreshold = settings?.overtimeThresholdMinutes ?? 60;
-    let overtimeMinutes = 0;
-    const excessMinutes = totalWorkMinutes - snapshotFullDayMins;
-    if (excessMinutes >= overtimeThreshold) {
-      overtimeMinutes = excessMinutes;
-    }
+    const overtimeMinutes = calculateOvertime(
+      totalWorkMinutes,
+      snapshotFullDayMins,
+      overtimeThreshold,
+    );
 
     /* 8. Determine Status */
     let status: AttendanceStatus = AttendanceStatus.ABSENT;
@@ -201,4 +201,17 @@ export class AttendanceCalculationService {
       `Recalculated attendance record for employee ${employeeId} on ${startOfTargetDate.toISOString()} with status ${status}`,
     );
   }
+}
+
+/* Evaluates overtime based on shift thresholds and org attendance settings */
+export function calculateOvertime(
+  effectiveWorkMinutes: number,
+  expectedFullDayMinutes: number,
+  overtimeThresholdMinutes: number,
+): number {
+  const excessMinutes = effectiveWorkMinutes - expectedFullDayMinutes;
+  if (excessMinutes >= overtimeThresholdMinutes) {
+    return excessMinutes;
+  }
+  return 0;
 }
