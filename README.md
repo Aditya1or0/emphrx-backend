@@ -1,26 +1,32 @@
 # EmpHrx — Backend Architecture & Attendance Engine
 
 > **Core Stack**: NestJS (v12) + Fastify + PostgreSQL + Prisma ORM + Redis + BullMQ + Swagger  
-> **Production Architecture**: Unified Multi-Method Capture Pipeline, Redis-Backed Ephemeral QR Session Engine, Transactional Outbox Pattern, and BullMQ Asynchronous Calculation Workers.
+> **Production Architecture**: Multi-Method Capture Gateway, Repository Pattern, Redis Ephemeral Nonces, Transactional Outbox, BullMQ Asynchronous Calculation Workers, and Standardized Response Envelopes.
 
 ---
 
 ## 1. Architecture Overview
 
 EmpHrx provides a unified attendance management platform designed for diverse organizational archetypes:
-1. **Office / Reception Displays**: Dynamic rotating QR codes generated on tablet/kiosk displays with 30-second TTL and single-use cryptographic nonces.
-2. **Mobile GPS Geofencing**: Geofence boundary checks (Haversine distance) with mock-location mitigations for field, remote, and hybrid staff.
-3. **Biometric Terminals**: HMAC-signed webhook log ingestion for hardware terminals (eSSL, ZKTeco).
-4. **Administrative Overrides**: Manual punch adjustments, regularizations, and WFH tracking with immutable audit trails.
+1. **Dynamic QR Code Display**: Ephemeral rotating QR codes on kiosk/tablet displays with 30s TTL, single-use cryptographic nonces in Redis, and anti-replay protection.
+2. **Mobile GPS Geofencing**: Geofence boundary checks (Haversine distance) with GPS accuracy bounds verification to prevent spoofing.
+3. **Overnight Shift Resolution**: Shifts crossing midnight (e.g. 22:00 to 06:00) resolve logically to the shift start business date rather than splitting across calendar dates.
+4. **Attendance Regularizations**: Formal missed punch / correction requests with approval workflows and automatic BullMQ recalculation.
+5. **Work From Home (WFH)**: Date range WFH requests with manager approvals and daily punch reconciliation.
+6. **Configurable Settings & Holidays**: Organization-level working hours, half-day hours, grace periods, weekly off-days, and holiday calendars.
+7. **Biometric Terminals**: (Phase 3) Hardware terminal HMAC push webhooks (eSSL, ZKTeco).
 
-### Architectural Principles
-* **Single Capture Gateway (`AttendanceCaptureService`)**: All punch methods share unified validation, tenant scoping, Redis debounce locking, and idempotency guarantees.
-* **Separation of Raw Events vs. Rollup State**:
+### Architectural Rules
+* **Unified Ingestion Gateway (`AttendanceCaptureService`)**: All capture methods share unified validation, tenant scoping, Redis debounce locking, and idempotency guarantees.
+* **Repository Pattern (`src/modules/attendance/repositories/`)**: All Prisma queries are encapsulated within dedicated repository classes.
+* **Separation of Raw Ledger vs Rollup State**:
   * `attendance_punches`: Append-only, immutable physical event ledger.
-  * `attendance_records`: Materialized daily summaries (`firstCheckIn`, `lastCheckOut`, `totalWorkMinutes`, `lateMinutes`, `status`).
-* **Zero Synchronous Recalculation on Punch**: Ingestion persists the punch and inserts an `outbox_events` row inside a single ACID `$transaction` in < 50ms. A BullMQ worker (`attendance.calculate`) processes recalculations asynchronously.
-* **Ephemeral Data in Redis**: Dynamic QR tokens and nonces live exclusively in Redis with 30s TTL, eliminating database write bloat.
-* **Historical Shift Snapshots**: Shift parameters (`snapshotShiftCode`, `snapshotStartTime`, `snapshotEndTime`, `snapshotFullDayMins`, `snapshotGraceMins`) are snapshotted onto `attendance_records` so future policy changes never alter past attendance.
+  * `attendance_records`: Materialized daily summaries with snapshotted shift policies.
+* **Transactional Outbox (`OutboxEvent`)**: Punch writes and outbox events commit atomically in a single `$transaction`. BullMQ workers process rollups asynchronously.
+* **Development Identity Abstraction (`@CurrentActor()` / `RequestActor`)**:
+  * Attendance endpoints resolve caller context through a decoupled `@CurrentActor()` decorator reading `x-org-id` and `x-actor-id` (or `x-employee-id`).
+  * Enforces strict validation without fallbacks (`default-org-id`), enabling seamless drop-in transition to future AuthGuard/sessions without rewriting controllers or services.
+* **Standard Response Envelope**: Responses conform to `{ success: true, statusCode, message, data, meta }` and errors to `{ success: false, statusCode, error, message, timestamp, path }`.
 
 ---
 
@@ -28,15 +34,18 @@ EmpHrx provides a unified attendance management platform designed for diverse or
 
 ```
 emphrx-backend/
+├── CODING_STANDARDS.md                  /* Engineering standards, response envelopes, commenting rules */
 ├── prisma/
-│   └── schema.prisma                    /* Production PostgreSQL Prisma schema */
+│   └── schema.prisma                    /* PostgreSQL schema with 14 production models */
 ├── src/
-│   ├── app.controller.ts
-│   ├── app.module.ts                    /* Root module registering Config, Prisma, Redis, Attendance */
-│   ├── app.service.ts
-│   ├── main.ts                          /* Fastify bootstrap, global validation, Swagger OpenAPI */
-│   ├── phase1-verify.ts                 /* Phase 1 end-to-end verification script */
+│   ├── main.ts                          /* Fastify bootstrap, Swagger OpenAPI, global filter & interceptor */
+│   ├── phase1-verify.ts                 /* Phase 1 integration verification script */
+│   ├── phase2-verify.ts                 /* Phase 2 integration verification script */
 │   ├── common/
+│   │   ├── filters/
+│   │   │   └── http-exception.filter.ts /* Global error catching & standard error envelope */
+│   │   ├── interceptors/
+│   │   │   └── transform.interceptor.ts /* Standard success response wrapper */
 │   │   └── redis/
 │   │       ├── redis.module.ts          /* Global Redis module */
 │   │       └── redis.service.ts         /* ioredis client, atomic debounce lock, Lua nonce script */
@@ -45,106 +54,107 @@ emphrx-backend/
 │   │   └── prisma.service.ts            /* PrismaClient lifecycle management */
 │   └── modules/
 │       └── attendance/
-│           ├── attendance.module.ts     /* Wires controllers, services, and queue worker */
+│           ├── attendance.module.ts     /* Wires controllers, services, repositories, and workers */
 │           ├── controllers/
-│           │   ├── qr-attendance.controller.ts    /* Kiosk session, check-in, check-out */
-│           │   └── attendance.controller.ts       /* Manual punch, paginated list, daily view */
+│           │   ├── qr-attendance.controller.ts       /* Dynamic QR session, check-in, check-out */
+│           │   ├── geo-attendance.controller.ts      /* Mobile GPS check-in, check-out */
+│           │   ├── attendance.controller.ts          /* Manual punch, query list, daily view */
+│           │   ├── regularization.controller.ts      /* Correction requests & manager approvals */
+│           │   ├── wfh.controller.ts                 /* WFH requests & manager approvals */
+│           │   └── attendance-setting.controller.ts  /* Organization attendance settings & rules */
 │           ├── dto/
-│           │   ├── qr-session.dto.ts              /* Kiosk session request/response */
-│           │   ├── qr-punch.dto.ts                /* Mobile QR punch payload */
-│           │   ├── manual-punch.dto.ts            /* Admin manual entry payload */
-│           │   └── attendance-query.dto.ts        /* Filterable pagination query */
+│           │   ├── qr-session.dto.ts
+│           │   ├── qr-punch.dto.ts
+│           │   ├── geo-punch.dto.ts
+│           │   ├── manual-punch.dto.ts
+│           │   ├── regularization.dto.ts
+│           │   ├── wfh.dto.ts
+│           │   ├── attendance-setting.dto.ts
+│           │   └── attendance-query.dto.ts
 │           ├── enums/
-│           │   └── attendance.enums.ts            /* PunchType, CaptureMethod, AttendanceStatus, etc. */
+│           │   └── attendance.enums.ts
+│           ├── repositories/
+│           │   ├── attendance-punch.repository.ts
+│           │   ├── attendance-record.repository.ts
+│           │   ├── attendance-location.repository.ts
+│           │   ├── attendance-regularization.repository.ts
+│           │   ├── attendance-wfh.repository.ts
+│           │   └── attendance-setting.repository.ts
 │           ├── services/
-│           │   ├── attendance.service.ts          /* Multi-filter query and employee daily view */
-│           │   ├── attendance-capture.service.ts  /* UNIFIED INGESTION ENGINE (ACID + Lock + Outbox) */
-│           │   ├── attendance-calculation.service.ts /* DAILY ROLLUP CALCULATOR & SHIFT SNAPSHOTTER */
-│           │   └── qr/
-│           │       └── qr-session.service.ts      /* Dynamic JWT tokens & Redis ephemeral nonces */
+│           │   ├── attendance-capture.service.ts     /* UNIFIED INGESTION (QR, Geo, Manual) */
+│           │   ├── attendance-calculation.service.ts /* DAILY ROLLUP & SHIFT SNAPSHOT ENGINE */
+│           │   ├── attendance.service.ts             /* Multi-filter query and employee daily view */
+│           │   ├── regularization.service.ts         /* Correction workflow & audit logging */
+│           │   ├── wfh.service.ts                    /* WFH workflow & punch reconciliation */
+│           │   ├── attendance-setting.service.ts     /* Org rules, off days, and grace limits */
+│           │   ├── qr/
+│           │   │   └── qr-session.service.ts         /* Dynamic QR tokens & Redis nonces */
+│           │   └── geolocation/
+│           │       └── geofence.service.ts           /* Haversine distance & accuracy checks */
 │           └── workers/
-│               └── attendance-queue.worker.ts     /* BullMQ worker & Transactional Outbox relay */
+│               └── attendance-queue.worker.ts        /* BullMQ worker & Outbox relay */
 ```
 
 ---
 
-## 3. Database Schema Design (Prisma)
+## 3. API Surface & Swagger OpenAPI
 
-### Core Models
-| Table | Description |
-|---|---|
-| `organizations` | Tenant entity with plan tier (`FREE`, `STARTER`, `BUSINESS`, `ENTERPRISE`) and seat limits. |
-| `employees` | Employee profile scoped by tenant with composite unique `[orgId, email]` and `[orgId, employeeCode]`. |
-| `shifts` | Working shift hours, overnight flag (`isOvernight`), and grace windows. |
-| `attendance_settings` | Org-level work hours, half-day hours, weekly off-days (`weeklyOffDays`), and holiday linkages. |
-| `holidays` | Organizational holiday calendar records. |
-| `attendance_locations` | Office worksite coordinates, radius (meters), and enabled capture methods. |
-| `attendance_devices` | Hardware biometric terminals (serial number, IP, hashed API key/secret, status). |
-| `attendance_device_mappings` | Join relating employees to terminal-specific biometric enrollment IDs. |
-| `attendance_punches` | Immutable physical punch ledger with client `idempotencyKey` and `businessDate`. |
-| `attendance_records` | Aggregate daily summary with snapshotted shift policy values. |
-| `attendance_regularizations` | Correction requests with manager/HR approval pipeline. |
-| `attendance_wfh_requests` | Work From Home date range requests. |
-| `outbox_events` | Transactional outbox table consumed by BullMQ queue relay. |
-| `audit_logs` | Immutable audit trail for manual entries, overrides, and approvals. |
-
----
-
-## 4. API Endpoints & Swagger Documentation
-
-Interactive Swagger OpenAPI documentation is available locally at:
+Interactive Swagger documentation is available locally at:  
 👉 **`http://localhost:4000/api/docs`**
 
 ### Active Endpoints
 
 #### Dynamic QR Attendance (`/api/attendance/qr`)
-* `POST /api/attendance/qr/session`: Kiosk displays request new dynamic QR session token (refreshes every 15–30s).
-* `POST /api/attendance/qr/check-in`: Mobile scans QR to clock in. Atomically consumes nonce via Redis Lua script.
+* `POST /api/attendance/qr/session`: Kiosk displays request rotating QR token (30s TTL in Redis).
+* `POST /api/attendance/qr/check-in`: Mobile scans QR to clock in with atomic single-use nonce consumption.
 * `POST /api/attendance/qr/check-out`: Mobile scans QR to clock out.
 
+#### Geolocation & Geofencing (`/api/attendance/geo`)
+* `POST /api/attendance/geo/check-in`: Mobile GPS check-in with Haversine distance geofence validation.
+* `POST /api/attendance/geo/check-out`: Mobile GPS check-out.
+
 #### Attendance Management & Queries (`/api/attendance`)
-* `POST /api/attendance/manual`: HR/Admin manual punch exception (writes to `audit_logs`).
-* `GET /api/attendance`: Paginated query with filters (`startDate`, `endDate`, `employeeId`, `status`, `page`, `limit`).
+* `POST /api/attendance/manual`: Administrative manual punch exception (writes to `audit_logs`).
+* `GET /api/attendance`: Paginated query with date range, employee, and status filters.
 * `GET /api/attendance/:employeeId/:date`: Single employee day summary with punch timeline and snapshotted shift info.
+
+#### Regularization Requests (`/api/attendance/regularizations`)
+* `POST /api/attendance/regularizations`: Employee submits punch correction request.
+* `PATCH /api/attendance/regularizations/:id/approve`: Manager/HR approval (triggers BullMQ recalculation).
+* `PATCH /api/attendance/regularizations/:id/reject`: Manager/HR rejection.
+* `GET /api/attendance/regularizations/employee/:employeeId`: Historical requests for employee.
+
+#### Work From Home (`/api/attendance/wfh`)
+* `POST /api/attendance/wfh`: Employee submits WFH date range request.
+* `PATCH /api/attendance/wfh/:id/approve`: Approval updates matching daily records to `WORK_FROM_HOME`.
+* `PATCH /api/attendance/wfh/:id/reject`: Rejection.
+* `GET /api/attendance/wfh/employee/:employeeId`: Historical WFH requests.
+
+#### Organization Settings (`/api/attendance/settings`)
+* `GET /api/attendance/settings`: Fetch working hours, half-day hours, grace periods, weekly off days.
+* `PUT /api/attendance/settings`: Update settings with audit logging.
 
 ---
 
-## 5. Local Setup & Execution
+## 4. Local Execution & Verification
 
 ### 1. Prerequisites
-* **Node.js**: v22.x or later
-* **PostgreSQL**: v15+ running on port `5432`
-* **Redis**: v7+ running on port `6379`
+* **Node.js**: v22.x
+* **PostgreSQL**: v15+ on port `5432` (`emphrx_db`)
+* **Redis**: v7+ on port `6379`
 
-### 2. Environment Configuration
-Create or update `.env` in `emphrx-backend/`:
-```env
-PORT=4000
-DATABASE_URL="postgresql://postgres:admin123@localhost:5432/emphrx_db?schema=public"
-REDIS_HOST="127.0.0.1"
-REDIS_PORT=6379
-REDIS_PASSWORD=""
-QR_JWT_SECRET="emphrx_super_secure_qr_signing_secret_key_2026"
-```
-
-### 3. Install Dependencies & Generate Prisma Client
+### 2. Run End-to-End Tests
 ```bash
-npm install
-npx prisma generate
-npx prisma db push
-```
-
-### 4. Run End-to-End Phase 1 Verification Script
-Runs an end-to-end integration test creating a tenant, shift, employee, dynamic QR session in Redis, anti-replay attack test, outbox event verification, and async calculation rollup:
-```bash
-npm run build
+# Phase 1 Verification (QR, Anti-replay, Outbox, BullMQ, Shift Snapshots)
 node dist/phase1-verify.js
+
+# Phase 2 Verification (Geolocation, Geofence radius, Overnight Shifts, Regularization, WFH, Settings)
+node dist/phase2-verify.js
 ```
 
-### 5. Start Development Server
+### 3. Start Development Server
 ```bash
 npm run start:dev
 ```
-Access the application:
-* Base API: `http://localhost:4000/api`
-* Swagger Docs: `http://localhost:4000/api/docs`
+* Base URL: `http://localhost:4000/api`
+* Swagger UI: `http://localhost:4000/api/docs`

@@ -7,8 +7,10 @@ import {
 import { PrismaService } from '../../../database/prisma.service.js';
 import { RedisService } from '../../../common/redis/redis.service.js';
 import { QrSessionService } from './qr/qr-session.service.js';
+import { GeofenceService } from './geolocation/geofence.service.js';
 import { AttendanceQueueWorker } from '../workers/attendance-queue.worker.js';
 import { QrPunchDto } from '../dto/qr-punch.dto.js';
+import { GeoPunchDto } from '../dto/geo-punch.dto.js';
 import { ManualPunchDto } from '../dto/manual-punch.dto.js';
 import {
   AuditAction,
@@ -34,6 +36,7 @@ export class AttendanceCaptureService {
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
     private readonly qrSessionService: QrSessionService,
+    private readonly geofenceService: GeofenceService,
     private readonly queueWorker: AttendanceQueueWorker,
   ) {}
 
@@ -150,11 +153,120 @@ export class AttendanceCaptureService {
     }
   }
 
+  /* Captures mobile GPS geofenced check-in or check-out */
+  async captureGeoPunch(
+    orgId: string,
+    employeeId: string,
+    dto: GeoPunchDto,
+    punchType: PunchType,
+  ): Promise<PunchResult> {
+    /* 1. Validate coordinates against office radius via Haversine */
+    const geoResult = await this.geofenceService.validateCoordinates(
+      orgId,
+      dto.latitude,
+      dto.longitude,
+      dto.accuracy,
+      dto.locationId,
+    );
+
+    const punchTime = new Date();
+
+    /* 2. Retrieve employee and assigned shift */
+    const employee = await this.prisma.employee.findUnique({
+      where: { id: employeeId },
+      include: { assignedShift: true },
+    });
+
+    if (!employee || employee.orgId !== orgId) {
+      throw new BadRequestException('Employee not found or unassociated with tenant');
+    }
+
+    const businessDate = this.resolveBusinessDate(
+      punchTime,
+      employee.assignedShift?.isOvernight ?? false,
+    );
+    const dateStr = businessDate.toISOString().split('T')[0];
+
+    /* 3. Acquire short Redis debounce lock */
+    const lockKey = `lock:punch:${employeeId}:${dateStr}`;
+    const acquired = await this.redisService.acquireLock(lockKey, 5);
+    if (!acquired) {
+      throw new ConflictException('A punch request is already being processed');
+    }
+
+    try {
+      let flagReason: string | undefined = undefined;
+      if (!geoResult.isWithinGeofence) {
+        flagReason = `Punch outside geofence radius (${geoResult.distanceMeters}m from center)`;
+      } else if (!geoResult.isAccuracyAcceptable) {
+        flagReason = `Low accuracy GPS reading (${dto.accuracy}m)`;
+      }
+
+      /* 4. Single ACID database transaction for punch and outbox event */
+      const punch = await this.prisma.$transaction(async (tx) => {
+        const createdPunch = await tx.attendancePunch.create({
+          data: {
+            orgId,
+            employeeId,
+            businessDate,
+            punchType,
+            punchTime,
+            captureMethod: CaptureMethod.GEOLOCATION,
+            locationId: geoResult.location.id,
+            latitude: dto.latitude,
+            longitude: dto.longitude,
+            gpsAccuracyMeters: dto.accuracy,
+            isWithinGeofence: geoResult.isWithinGeofence,
+            idempotencyKey: dto.idempotencyKey,
+            isVerified: geoResult.isWithinGeofence,
+            flagReason,
+          },
+        });
+
+        await tx.outboxEvent.create({
+          data: {
+            orgId,
+            eventType: 'ATTENDANCE_GEO_PUNCHED',
+            aggregateId: createdPunch.id,
+            status: OutboxStatus.PENDING,
+            payload: {
+              punchId: createdPunch.id,
+              employeeId,
+              businessDate: dateStr,
+              punchType,
+              distanceMeters: geoResult.distanceMeters,
+            },
+          },
+        });
+
+        return createdPunch;
+      });
+
+      /* 5. Non-blocking async queue dispatch */
+      await this.queueWorker.enqueueCalculation(orgId, employeeId, businessDate);
+
+      const statusText = punchType === PunchType.CHECK_IN ? 'Check-in' : 'Check-out';
+      const fenceText = geoResult.isWithinGeofence
+        ? `within ${geoResult.location.name} (${geoResult.distanceMeters}m)`
+        : `outside boundary (${geoResult.distanceMeters}m)`;
+
+      return {
+        punchId: punch.id,
+        punchType: punch.punchType as PunchType,
+        punchTime: punch.punchTime.toISOString(),
+        captureMethod: CaptureMethod.GEOLOCATION,
+        businessDate: dateStr,
+        message: `${statusText} recorded ${fenceText}`,
+      };
+    } finally {
+      await this.redisService.releaseLock(lockKey);
+    }
+  }
+
   /* Captures administrative manual attendance entry */
   async captureManualPunch(
     orgId: string,
     actorId: string,
-    actorRole: string,
     dto: ManualPunchDto,
   ): Promise<PunchResult> {
     const employee = await this.prisma.employee.findUnique({
@@ -194,7 +306,7 @@ export class AttendanceCaptureService {
         data: {
           orgId,
           actorId,
-          actorRole,
+          actorRole: 'USER',
           action: AuditAction.CREATE,
           entityName: 'AttendancePunch',
           entityId: createdPunch.id,

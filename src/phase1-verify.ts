@@ -188,7 +188,6 @@ async function runVerification() {
   const manualPunch = await captureService.captureManualPunch(
     org.id,
     'admin-user-uuid',
-    'HR_MANAGER',
     {
       employeeId: employee.id,
       punchType: PunchType.CHECK_OUT,
