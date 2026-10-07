@@ -1,14 +1,22 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service.js';
+import { TierEntitlementService } from './tier-entitlement.service.js';
 import { AttendanceQueryDto } from '../dto/attendance-query.dto.js';
 import { AttendanceStatus } from '../enums/attendance.enums.js';
 
 @Injectable()
 export class AttendanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tierService: TierEntitlementService,
+  ) {}
 
   /* Query paginated daily attendance records with multi-filters */
   async getAttendanceRecords(orgId: string, query: AttendanceQueryDto) {
+    if (query.startDate) {
+      await this.tierService.enforceHistoryRetention(orgId, query.startDate);
+    }
+
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
@@ -76,6 +84,8 @@ export class AttendanceService {
     employeeId: string,
     dateString: string,
   ) {
+    await this.tierService.enforceHistoryRetention(orgId, dateString);
+
     const targetDate = new Date(dateString);
     targetDate.setUTCHours(0, 0, 0, 0);
 

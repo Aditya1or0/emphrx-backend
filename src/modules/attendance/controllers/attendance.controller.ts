@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -20,6 +19,8 @@ import { AttendanceService } from '../services/attendance.service.js';
 import { AttendanceCaptureService } from '../services/attendance-capture.service.js';
 import { ManualPunchDto } from '../dto/manual-punch.dto.js';
 import { AttendanceQueryDto } from '../dto/attendance-query.dto.js';
+import { CurrentActor } from '../../../common/decorators/current-actor.decorator.js';
+import type { RequestActor } from '../../../common/interfaces/request-actor.interface.js';
 
 @ApiTags('Attendance - Management & Query')
 @Controller('attendance')
@@ -37,23 +38,17 @@ export class AttendanceController {
     description:
       'Creates an administrative attendance punch exception with mandatory reason and writes to immutable audit_logs.',
   })
-  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: false })
-  @ApiHeader({ name: 'x-actor-id', description: 'Actor user ID', required: false })
-  @ApiHeader({ name: 'x-actor-role', description: 'Actor role (e.g. HR_ADMIN)', required: false })
+  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: true })
+  @ApiHeader({ name: 'x-actor-id', description: 'Actor / Admin user ID', required: true })
   @ApiResponse({ status: 200, description: 'Manual punch recorded and calculation queued' })
+  @ApiResponse({ status: 400, description: 'Missing actor header or invalid punch payload' })
   async recordManualPunch(
-    @Headers('x-org-id') orgId: string,
-    @Headers('x-actor-id') actorId: string,
-    @Headers('x-actor-role') actorRole: string,
+    @CurrentActor() actor: RequestActor,
     @Body() dto: ManualPunchDto,
   ) {
-    const resolvedOrgId = orgId || 'default-org-id';
-    const resolvedActorId = actorId || 'admin-actor';
-    const resolvedRole = actorRole || 'HR_ADMIN';
     return this.captureService.captureManualPunch(
-      resolvedOrgId,
-      resolvedActorId,
-      resolvedRole,
+      actor.orgId,
+      actor.userId,
       dto,
     );
   }
@@ -65,14 +60,13 @@ export class AttendanceController {
     description:
       'Retrieves paginated daily calculated attendance records with date range, employee, and status filters.',
   })
-  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: false })
+  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: true })
   @ApiResponse({ status: 200, description: 'Paginated attendance records list' })
   async getAttendanceRecords(
-    @Headers('x-org-id') orgId: string,
+    @CurrentActor({ requireUser: false }) actor: RequestActor,
     @Query() query: AttendanceQueryDto,
   ) {
-    const resolvedOrgId = orgId || 'default-org-id';
-    return this.attendanceService.getAttendanceRecords(resolvedOrgId, query);
+    return this.attendanceService.getAttendanceRecords(actor.orgId, query);
   }
 
   /* Retrieve single employee attendance record and all punches for specific date */
@@ -82,19 +76,18 @@ export class AttendanceController {
     description:
       'Returns daily summary record and chronological list of all punches and location data for the date.',
   })
-  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: false })
+  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: true })
   @ApiParam({ name: 'employeeId', description: 'Employee UUID' })
   @ApiParam({ name: 'date', description: 'Date in YYYY-MM-DD format', example: '2026-10-06' })
   @ApiResponse({ status: 200, description: 'Employee daily attendance breakdown' })
   @ApiResponse({ status: 404, description: 'Record not found' })
   async getEmployeeAttendanceByDate(
-    @Headers('x-org-id') orgId: string,
+    @CurrentActor({ requireUser: false }) actor: RequestActor,
     @Param('employeeId') employeeId: string,
     @Param('date') date: string,
   ) {
-    const resolvedOrgId = orgId || 'default-org-id';
     return this.attendanceService.getEmployeeAttendanceByDate(
-      resolvedOrgId,
+      actor.orgId,
       employeeId,
       date,
     );

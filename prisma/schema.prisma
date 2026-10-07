@@ -1,13 +1,14 @@
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 generator client {
   provider = "prisma-client-js"
 }
 
-/* Enums for system-wide type safety without magic strings */
+/**
+ * Enums for system-wide type safety without magic strings
+ */
 enum PunchType {
   CHECK_IN
   CHECK_OUT
@@ -83,53 +84,57 @@ enum AuditAction {
   OVERRIDE
 }
 
-/* Tenant core organization entity */
+/**
+ * Tenant core organization entity
+ */
 model Organization {
-  id                   String                 @id @default(uuid())
-  name                 String
-  slug                 String                 @unique
-  tier                 OrganizationTier       @default(FREE)
-  maxEmployees         Int                    @default(10)
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  id           String           @id @default(uuid())
+  name         String
+  slug         String           @unique
+  tier         OrganizationTier @default(FREE)
+  maxEmployees Int              @default(10)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
-  employees            Employee[]
-  shifts               Shift[]
-  attendanceSettings   AttendanceSetting?
-  holidays             Holiday[]
-  attendanceLocations  AttendanceLocation[]
-  devices              AttendanceDevice[]
-  attendanceRecords    AttendanceRecord[]
-  attendancePunches    AttendancePunch[]
-  auditLogs            AuditLog[]
-  outboxEvents         OutboxEvent[]
+  employees           Employee[]
+  shifts              Shift[]
+  attendanceSettings  AttendanceSetting?
+  holidays            Holiday[]
+  attendanceLocations AttendanceLocation[]
+  devices             AttendanceDevice[]
+  attendanceRecords   AttendanceRecord[]
+  attendancePunches   AttendancePunch[]
+  auditLogs           AuditLog[]
+  outboxEvents        OutboxEvent[]
 
   @@map("organizations")
 }
 
-/* Multi-tenant employee profile */
+/**
+ * Multi-tenant employee profile
+ */
 model Employee {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  employeeCode         String                 @map("employee_code")
-  firstName            String                 @map("first_name")
-  lastName             String                 @map("last_name")
-  email                String
-  isActive             Boolean                @default(true) @map("is_active")
-  assignedShiftId      String?                @map("assigned_shift_id")
-  assignedLocationId   String?                @map("assigned_location_id")
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  id                 String   @id @default(uuid())
+  orgId              String   @map("org_id")
+  employeeCode       String   @map("employee_code")
+  firstName          String   @map("first_name")
+  lastName           String   @map("last_name")
+  email              String
+  isActive           Boolean  @default(true) @map("is_active")
+  assignedShiftId    String?  @map("assigned_shift_id")
+  assignedLocationId String?  @map("assigned_location_id")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  assignedShift        Shift?                 @relation(fields: [assignedShiftId], references: [id])
-  assignedLocation     AttendanceLocation?    @relation(fields: [assignedLocationId], references: [id])
-  
-  punches              AttendancePunch[]
-  records              AttendanceRecord[]
-  regularizations      AttendanceRegularization[]
-  wfhRequests          AttendanceWfhRequest[]
-  deviceMappings       AttendanceDeviceMapping[]
+  organization     Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assignedShift    Shift?              @relation(fields: [assignedShiftId], references: [id])
+  assignedLocation AttendanceLocation? @relation(fields: [assignedLocationId], references: [id])
+
+  punches         AttendancePunch[]
+  records         AttendanceRecord[]
+  regularizations AttendanceRegularization[]
+  wfhRequests     AttendanceWfhRequest[]
+  deviceMappings  AttendanceDeviceMapping[]
 
   @@unique([orgId, employeeCode])
   @@unique([orgId, email])
@@ -137,287 +142,319 @@ model Employee {
   @@map("employees")
 }
 
-/* Shift configuration defining expected working hours */
+/**
+ * Shift configuration defining expected working hours
+ */
 model Shift {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  name                 String
-  code                 String
-  startTime            String                 /* Expected start time in HH:mm 24h format */
-  endTime              String                 /* Expected end time in HH:mm 24h format */
-  isOvernight          Boolean                @default(false) @map("is_overnight")
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  id          String   @id @default(uuid())
+  orgId       String   @map("org_id")
+  name        String
+  code        String
+  startTime   String /* Expected start time in HH:mm 24h format */
+  endTime     String /* Expected end time in HH:mm 24h format */
+  isOvernight Boolean  @default(false) @map("is_overnight")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  employees            Employee[]
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  employees    Employee[]
 
   @@unique([orgId, code])
   @@map("shifts")
 }
 
-/* Comprehensive organizational attendance settings */
+/**
+ * Comprehensive organizational attendance settings
+ */
 model AttendanceSetting {
-  id                        String             @id @default(uuid())
-  orgId                     String             @unique @map("org_id")
-  defaultWorkHoursMinutes   Int                @default(480) @map("default_work_hours_minutes")
-  defaultHalfDayMinutes     Int                @default(240) @map("default_half_day_minutes")
-  graceMinutes              Int                @default(15) @map("grace_minutes")
-  lateMarkAfterMinutes      Int                @default(15) @map("late_mark_after_minutes")
-  earlyExitBeforeMinutes    Int                @default(15) @map("early_exit_before_minutes")
-  overtimeThresholdMinutes  Int                @default(60) @map("overtime_threshold_minutes")
-  punchCooldownSeconds      Int                @default(60) @map("punch_cooldown_seconds")
-  maxRegularizationDays     Int                @default(7) @map("max_regularization_days")
-  weeklyOffDays             DayOfWeek[]        @default([SATURDAY, SUNDAY]) @map("weekly_off_days")
-  allowWfh                  Boolean            @default(true) @map("allow_wfh")
-  requireGeoForQr           Boolean            @default(false) @map("require_geo_for_qr")
-  createdAt                 DateTime           @default(now())
-  updatedAt                 DateTime           @updatedAt
+  id                       String      @id @default(uuid())
+  orgId                    String      @unique @map("org_id")
+  defaultWorkHoursMinutes  Int         @default(480) @map("default_work_hours_minutes")
+  defaultHalfDayMinutes    Int         @default(240) @map("default_half_day_minutes")
+  graceMinutes             Int         @default(15) @map("grace_minutes")
+  lateMarkAfterMinutes     Int         @default(15) @map("late_mark_after_minutes")
+  earlyExitBeforeMinutes   Int         @default(15) @map("early_exit_before_minutes")
+  overtimeThresholdMinutes Int         @default(60) @map("overtime_threshold_minutes")
+  punchCooldownSeconds     Int         @default(60) @map("punch_cooldown_seconds")
+  maxRegularizationDays    Int         @default(7) @map("max_regularization_days")
+  weeklyOffDays            DayOfWeek[] @default([SATURDAY, SUNDAY]) @map("weekly_off_days")
+  allowWfh                 Boolean     @default(true) @map("allow_wfh")
+  requireGeoForQr          Boolean     @default(false) @map("require_geo_for_qr")
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
 
-  organization              Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@map("attendance_settings")
 }
 
-/* Organizational holiday calendar */
+/**
+ * Organizational holiday calendar
+ */
 model Holiday {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  name                 String
-  date                 DateTime               @db.Date
-  isOptional           Boolean                @default(false) @map("is_optional")
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  id         String   @id @default(uuid())
+  orgId      String   @map("org_id")
+  name       String
+  date       DateTime @db.Date
+  isOptional Boolean  @default(false) @map("is_optional")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, date])
   @@map("holidays")
 }
 
-/* Office and worksite geofence definitions */
+/**
+ * Office and worksite geofence definitions
+ */
 model AttendanceLocation {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  name                 String
-  code                 String
-  latitude             Float
-  longitude            Float
-  radiusMeters         Int                    @default(100) @map("radius_meters")
-  timezone             String                 @default("Asia/Kolkata")
-  allowedMethods       CaptureMethod[]        @default([QR_CODE, GEOLOCATION]) @map("allowed_methods")
-  isQrEnabled          Boolean                @default(true) @map("is_qr_enabled")
-  isActive             Boolean                @default(true) @map("is_active")
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  id             String          @id @default(uuid())
+  orgId          String          @map("org_id")
+  name           String
+  code           String
+  latitude       Float
+  longitude      Float
+  radiusMeters   Int             @default(100) @map("radius_meters")
+  timezone       String          @default("Asia/Kolkata")
+  allowedMethods CaptureMethod[] @default([QR_CODE, GEOLOCATION]) @map("allowed_methods")
+  isQrEnabled    Boolean         @default(true) @map("is_qr_enabled")
+  isActive       Boolean         @default(true) @map("is_active")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  employees            Employee[]
-  punches              AttendancePunch[]
+  organization Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+  punches      AttendancePunch[]
 
   @@unique([orgId, code])
   @@index([orgId, isActive])
   @@map("attendance_locations")
 }
 
-/* Physical biometric terminal hardware */
+/**
+ * Physical biometric terminal hardware
+ */
 model AttendanceDevice {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  name                 String
-  serialNumber         String                 @map("serial_number")
-  deviceType           DeviceType             @default(ZKTECO) @map("device_type")
-  ipAddress            String?                @map("ip_address")
-  apiKeyHash           String                 @map("api_key_hash")
-  status               DeviceStatus           @default(ONLINE)
-  lastHeartbeatAt      DateTime?              @map("last_heartbeat_at")
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  id              String       @id @default(uuid())
+  orgId           String       @map("org_id")
+  name            String
+  serialNumber    String       @map("serial_number")
+  deviceType      DeviceType   @default(ZKTECO) @map("device_type")
+  ipAddress       String?      @map("ip_address")
+  apiKeyHash      String       @map("api_key_hash")
+  status          DeviceStatus @default(ONLINE)
+  lastHeartbeatAt DateTime?    @map("last_heartbeat_at")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  mappings             AttendanceDeviceMapping[]
-  punches              AttendancePunch[]
+  organization Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  mappings     AttendanceDeviceMapping[]
+  punches      AttendancePunch[]
 
   @@unique([orgId, serialNumber])
   @@index([orgId, status])
   @@map("attendance_devices")
 }
 
-/* Mapping between employee and their biometric enrollment ID on a specific terminal */
+/**
+ * Mapping between employee and their biometric enrollment ID on a specific terminal
+ */
 model AttendanceDeviceMapping {
-  id                   String                 @id @default(uuid())
-  deviceId             String                 @map("device_id")
-  employeeId           String                 @map("employee_id")
-  biometricEnrollId    String                 @map("biometric_enroll_id")
-  isActive             Boolean                @default(true) @map("is_active")
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  id                String   @id @default(uuid())
+  deviceId          String   @map("device_id")
+  employeeId        String   @map("employee_id")
+  biometricEnrollId String   @map("biometric_enroll_id")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  device               AttendanceDevice       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  employee             Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  device   AttendanceDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  employee Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([deviceId, biometricEnrollId])
   @@unique([deviceId, employeeId])
   @@map("attendance_device_mappings")
 }
 
-/* Immutable append-only punch ledger */
+/**
+ * Immutable append-only punch ledger
+ */
 model AttendancePunch {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  employeeId           String                 @map("employee_id")
-  businessDate         DateTime               @db.Date @map("business_date")
-  punchType            PunchType              @map("punch_type")
-  punchTime            DateTime               @map("punch_time")
-  captureMethod        CaptureMethod          @map("capture_method")
-  
-  /* Geolocation details */
-  locationId           String?                @map("location_id")
-  latitude             Float?
-  longitude            Float?
-  gpsAccuracyMeters    Float?                 @map("gps_accuracy_meters")
-  isWithinGeofence     Boolean?               @map("is_within_geofence")
+  id            String        @id @default(uuid())
+  orgId         String        @map("org_id")
+  employeeId    String        @map("employee_id")
+  businessDate  DateTime      @map("business_date") @db.Date
+  punchType     PunchType     @map("punch_type")
+  punchTime     DateTime      @map("punch_time")
+  captureMethod CaptureMethod @map("capture_method")
 
-  /* Biometric hardware link */
-  deviceId             String?                @map("device_id")
-  rawLogId             String?                @map("raw_log_id")
+  /**
+   * Geolocation details
+   */
+  locationId        String?  @map("location_id")
+  latitude          Float?
+  longitude         Float?
+  gpsAccuracyMeters Float?   @map("gps_accuracy_meters")
+  isWithinGeofence  Boolean? @map("is_within_geofence")
 
-  /* Security and deduplication */
-  ipAddress            String?                @map("ip_address")
-  userAgent            String?                @map("user_agent")
-  idempotencyKey       String?                @unique @map("idempotency_key")
-  isVerified           Boolean                @default(true) @map("is_verified")
-  flagReason           String?                @map("flag_reason")
-  createdAt            DateTime               @default(now()) @map("created_at")
+  /**
+   * Biometric hardware link
+   */
+  deviceId String? @map("device_id")
+  rawLogId String? @map("raw_log_id")
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  employee             Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  location             AttendanceLocation?    @relation(fields: [locationId], references: [id])
-  device               AttendanceDevice?      @relation(fields: [deviceId], references: [id])
+  /**
+   * Security and deduplication
+   */
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  idempotencyKey String?  @unique @map("idempotency_key")
+  isVerified     Boolean  @default(true) @map("is_verified")
+  flagReason     String?  @map("flag_reason")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  employee     Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  location     AttendanceLocation? @relation(fields: [locationId], references: [id])
+  device       AttendanceDevice?   @relation(fields: [deviceId], references: [id])
 
   @@index([orgId, employeeId, businessDate])
   @@map("attendance_punches")
 }
 
-/* Materialized daily rollup with snapshot shift rules for historical permanence */
+/**
+ * Materialized daily rollup with snapshot shift rules for historical permanence
+ */
 model AttendanceRecord {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  employeeId           String                 @map("employee_id")
-  date                 DateTime               @db.Date
-  
-  /* Snapshot shift policy configuration at time of generation */
-  snapshotShiftCode    String?                @map("snapshot_shift_code")
-  snapshotStartTime    String?                @map("snapshot_start_time")
-  snapshotEndTime      String?                @map("snapshot_end_time")
-  snapshotFullDayMins  Int                    @default(480) @map("snapshot_full_day_mins")
-  snapshotHalfDayMins  Int                    @default(240) @map("snapshot_half_day_mins")
-  snapshotGraceMins    Int                    @default(15) @map("snapshot_grace_mins")
+  id         String   @id @default(uuid())
+  orgId      String   @map("org_id")
+  employeeId String   @map("employee_id")
+  date       DateTime @db.Date
 
-  firstCheckIn         DateTime?              @map("first_check_in")
-  lastCheckOut         DateTime?              @map("last_check_out")
-  totalPunches         Int                    @default(0) @map("total_punches")
-  
-  totalWorkMinutes     Int                    @default(0) @map("total_work_minutes")
-  effectiveWorkMinutes Int                    @default(0) @map("effective_work_minutes")
-  breakMinutes         Int                    @default(0) @map("break_minutes")
-  lateMinutes          Int                    @default(0) @map("late_minutes")
-  earlyExitMinutes     Int                    @default(0) @map("early_exit_minutes")
-  overtimeMinutes      Int                    @default(0) @map("overtime_minutes")
+  /**
+   * Snapshot shift policy configuration at time of generation
+   */
+  snapshotShiftCode   String? @map("snapshot_shift_code")
+  snapshotStartTime   String? @map("snapshot_start_time")
+  snapshotEndTime     String? @map("snapshot_end_time")
+  snapshotFullDayMins Int     @default(480) @map("snapshot_full_day_mins")
+  snapshotHalfDayMins Int     @default(240) @map("snapshot_half_day_mins")
+  snapshotGraceMins   Int     @default(15) @map("snapshot_grace_mins")
 
-  status               AttendanceStatus       @default(ABSENT)
-  isRegularized        Boolean                @default(false) @map("is_regularized")
-  notes                String?
-  createdAt            DateTime               @default(now()) @map("created_at")
-  updatedAt            DateTime               @updatedAt @map("updated_at")
+  firstCheckIn DateTime? @map("first_check_in")
+  lastCheckOut DateTime? @map("last_check_out")
+  totalPunches Int       @default(0) @map("total_punches")
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  employee             Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  regularizations      AttendanceRegularization[]
+  totalWorkMinutes     Int @default(0) @map("total_work_minutes")
+  effectiveWorkMinutes Int @default(0) @map("effective_work_minutes")
+  breakMinutes         Int @default(0) @map("break_minutes")
+  lateMinutes          Int @default(0) @map("late_minutes")
+  earlyExitMinutes     Int @default(0) @map("early_exit_minutes")
+  overtimeMinutes      Int @default(0) @map("overtime_minutes")
+
+  status        AttendanceStatus @default(ABSENT)
+  isRegularized Boolean          @default(false) @map("is_regularized")
+  notes         String?
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  organization    Organization               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  employee        Employee                   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  regularizations AttendanceRegularization[]
 
   @@unique([orgId, employeeId, date])
   @@index([orgId, date, status])
   @@map("attendance_records")
 }
 
-/* Employee attendance correction requests */
+/**
+ * Employee attendance correction requests
+ */
 model AttendanceRegularization {
-  id                   String                 @id @default(uuid())
-  recordId             String                 @map("record_id")
-  employeeId           String                 @map("employee_id")
-  requestedCheckIn     DateTime?              @map("requested_check_in")
-  requestedCheckOut    DateTime?              @map("requested_check_out")
-  reason               String
-  status               RequestStatus          @default(PENDING)
-  actionedById         String?                @map("actioned_by_id")
-  actionReason         String?                @map("action_reason")
-  actionedAt           DateTime?              @map("actioned_at")
-  createdAt            DateTime               @default(now()) @map("created_at")
-  updatedAt            DateTime               @updatedAt @map("updated_at")
+  id                String        @id @default(uuid())
+  recordId          String        @map("record_id")
+  employeeId        String        @map("employee_id")
+  requestedCheckIn  DateTime?     @map("requested_check_in")
+  requestedCheckOut DateTime?     @map("requested_check_out")
+  reason            String
+  status            RequestStatus @default(PENDING)
+  actionedById      String?       @map("actioned_by_id")
+  actionReason      String?       @map("action_reason")
+  actionedAt        DateTime?     @map("actioned_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
 
-  record               AttendanceRecord       @relation(fields: [recordId], references: [id], onDelete: Cascade)
-  employee             Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  record   AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  employee Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId, status])
   @@index([recordId])
   @@map("attendance_regularizations")
 }
 
-/* Work from home requests */
+/**
+ * Work from home requests
+ */
 model AttendanceWfhRequest {
-  id                   String                 @id @default(uuid())
-  employeeId           String                 @map("employee_id")
-  fromDate             DateTime               @db.Date @map("from_date")
-  toDate               DateTime               @db.Date @map("to_date")
-  reason               String
-  status               RequestStatus          @default(PENDING)
-  actionedById         String?                @map("actioned_by_id")
-  actionReason         String?                @map("action_reason")
-  actionedAt           DateTime?              @map("actioned_at")
-  createdAt            DateTime               @default(now()) @map("created_at")
-  updatedAt            DateTime               @updatedAt @map("updated_at")
+  id           String        @id @default(uuid())
+  employeeId   String        @map("employee_id")
+  fromDate     DateTime      @map("from_date") @db.Date
+  toDate       DateTime      @map("to_date") @db.Date
+  reason       String
+  status       RequestStatus @default(PENDING)
+  actionedById String?       @map("actioned_by_id")
+  actionReason String?       @map("action_reason")
+  actionedAt   DateTime?     @map("actioned_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
 
-  employee             Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId, fromDate, toDate])
   @@map("attendance_wfh_requests")
 }
 
-/* Reliable transactional event publishing for BullMQ async processing */
+/**
+ * Reliable transactional event publishing for BullMQ async processing
+ */
 model OutboxEvent {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  eventType            String                 @map("event_type")
-  aggregateId          String                 @map("aggregate_id")
-  payload              Json
-  status               OutboxStatus           @default(PENDING)
-  retryCount           Int                    @default(0) @map("retry_count")
-  error                String?
-  createdAt            DateTime               @default(now()) @map("created_at")
-  processedAt          DateTime?              @map("processed_at")
+  id          String       @id @default(uuid())
+  orgId       String       @map("org_id")
+  eventType   String       @map("event_type")
+  aggregateId String       @map("aggregate_id")
+  payload     Json
+  status      OutboxStatus @default(PENDING)
+  retryCount  Int          @default(0) @map("retry_count")
+  error       String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  processedAt DateTime?    @map("processed_at")
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([status, createdAt])
   @@map("outbox_events")
 }
 
-/* Comprehensive audit log for manual overrides, regularizations, and settings changes */
+/**
+ * Comprehensive audit log for manual overrides, regularizations, and settings changes
+ */
 model AuditLog {
-  id                   String                 @id @default(uuid())
-  orgId                String                 @map("org_id")
-  actorId              String                 @map("actor_id")
-  actorRole            String                 @map("actor_role")
-  action               AuditAction
-  entityName           String                 @map("entity_name")
-  entityId             String                 @map("entity_id")
-  previousState        Json?                  @map("previous_state")
-  newState             Json?                  @map("new_state")
-  reason               String?
-  ipAddress            String?                @map("ip_address")
-  createdAt            DateTime               @default(now()) @map("created_at")
+  id            String      @id @default(uuid())
+  orgId         String      @map("org_id")
+  actorId       String      @map("actor_id")
+  actorRole     String      @map("actor_role")
+  action        AuditAction
+  entityName    String      @map("entity_name")
+  entityId      String      @map("entity_id")
+  previousState Json?       @map("previous_state")
+  newState      Json?       @map("new_state")
+  reason        String?
+  ipAddress     String?     @map("ip_address")
+  createdAt     DateTime    @default(now()) @map("created_at")
 
-  organization         Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, entityName, entityId])
   @@index([orgId, createdAt])

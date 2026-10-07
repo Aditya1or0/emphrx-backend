@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Headers,
   HttpCode,
   HttpStatus,
   Post,
@@ -17,6 +16,8 @@ import { AttendanceCaptureService } from '../services/attendance-capture.service
 import { CreateQrSessionDto, QrSessionResponseDto } from '../dto/qr-session.dto.js';
 import { QrPunchDto } from '../dto/qr-punch.dto.js';
 import { PunchType } from '../enums/attendance.enums.js';
+import { CurrentActor } from '../../../common/decorators/current-actor.decorator.js';
+import type { RequestActor } from '../../../common/interfaces/request-actor.interface.js';
 
 @ApiTags('Attendance - Dynamic QR')
 @Controller('attendance/qr')
@@ -34,14 +35,13 @@ export class QrAttendanceController {
     description:
       'Called by office kiosk displays every 15-30s. Generates a short-lived token and ephemeral nonce in Redis.',
   })
-  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: false })
+  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: true })
   @ApiResponse({ status: 201, description: 'QR session generated', type: QrSessionResponseDto })
   async createSession(
-    @Headers('x-org-id') orgId: string,
+    @CurrentActor({ requireUser: false }) actor: RequestActor,
     @Body() dto: CreateQrSessionDto,
   ) {
-    const resolvedOrgId = orgId || 'default-org-id';
-    return this.qrSessionService.createSession(resolvedOrgId, dto);
+    return this.qrSessionService.createSession(actor.orgId, dto);
   }
 
   /* Scanned by employee mobile app to clock in */
@@ -52,20 +52,17 @@ export class QrAttendanceController {
     description:
       'Scanned by employee mobile device. Atomically verifies and consumes nonce from Redis to prevent replay attacks.',
   })
-  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: false })
-  @ApiHeader({ name: 'x-employee-id', description: 'Employee UUID', required: false })
+  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: true })
+  @ApiHeader({ name: 'x-actor-id', description: 'Employee UUID (or x-employee-id)', required: true })
   @ApiResponse({ status: 200, description: 'Check-in recorded successfully' })
-  @ApiResponse({ status: 400, description: 'Token expired or replay detected' })
+  @ApiResponse({ status: 400, description: 'Token expired, replay detected, or missing actor header' })
   async checkIn(
-    @Headers('x-org-id') orgId: string,
-    @Headers('x-employee-id') employeeId: string,
+    @CurrentActor() actor: RequestActor,
     @Body() dto: QrPunchDto,
   ) {
-    const resolvedOrgId = orgId || 'default-org-id';
-    const resolvedEmpId = employeeId || 'default-employee-id';
     return this.captureService.captureQrPunch(
-      resolvedOrgId,
-      resolvedEmpId,
+      actor.orgId,
+      actor.userId,
       dto,
       PunchType.CHECK_IN,
     );
@@ -79,20 +76,17 @@ export class QrAttendanceController {
     description:
       'Scanned by employee mobile device to clock out. Atomically consumes token nonce from Redis.',
   })
-  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: false })
-  @ApiHeader({ name: 'x-employee-id', description: 'Employee UUID', required: false })
+  @ApiHeader({ name: 'x-org-id', description: 'Tenant Organization UUID', required: true })
+  @ApiHeader({ name: 'x-actor-id', description: 'Employee UUID (or x-employee-id)', required: true })
   @ApiResponse({ status: 200, description: 'Check-out recorded successfully' })
-  @ApiResponse({ status: 400, description: 'Token expired or replay detected' })
+  @ApiResponse({ status: 400, description: 'Token expired, replay detected, or missing actor header' })
   async checkOut(
-    @Headers('x-org-id') orgId: string,
-    @Headers('x-employee-id') employeeId: string,
+    @CurrentActor() actor: RequestActor,
     @Body() dto: QrPunchDto,
   ) {
-    const resolvedOrgId = orgId || 'default-org-id';
-    const resolvedEmpId = employeeId || 'default-employee-id';
     return this.captureService.captureQrPunch(
-      resolvedOrgId,
-      resolvedEmpId,
+      actor.orgId,
+      actor.userId,
       dto,
       PunchType.CHECK_OUT,
     );
