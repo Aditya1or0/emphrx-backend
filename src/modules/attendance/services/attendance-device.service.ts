@@ -16,6 +16,7 @@ import {
   BiometricPunchBatchDto,
 } from '../dto/device.dto.js';
 import {
+  ActorRole,
   AuditAction,
   DeviceStatus,
 } from '../enums/attendance.enums.js';
@@ -65,7 +66,7 @@ export class AttendanceDeviceService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.CREATE,
           entityName: 'AttendanceDevice',
           entityId: created.id,
@@ -131,7 +132,7 @@ export class AttendanceDeviceService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.UPDATE,
           entityName: 'AttendanceDevice',
           entityId: id,
@@ -160,7 +161,7 @@ export class AttendanceDeviceService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.DELETE,
           entityName: 'AttendanceDevice',
           entityId: id,
@@ -243,7 +244,7 @@ export class AttendanceDeviceService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.CREATE,
           entityName: 'AttendanceDeviceMapping',
           entityId: created.id,
@@ -279,7 +280,7 @@ export class AttendanceDeviceService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.DELETE,
           entityName: 'AttendanceDeviceMapping',
           entityId: mappingId,

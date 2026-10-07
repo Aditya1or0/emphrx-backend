@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service.js';
 import { AttendanceSettingRepository } from '../repositories/attendance-setting.repository.js';
 import { UpdateAttendanceSettingDto } from '../dto/attendance-setting.dto.js';
-import { AuditAction } from '../enums/attendance.enums.js';
+import { AuditAction, ActorRole } from '../enums/attendance.enums.js';
 
 @Injectable()
 export class AttendanceSettingService {
@@ -63,7 +63,7 @@ export class AttendanceSettingService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.UPDATE,
           entityName: 'AttendanceSetting',
           entityId: result.id,

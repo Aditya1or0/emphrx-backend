@@ -63,3 +63,12 @@ export enum DeviceStatus {
   DECOMMISSIONED = 'DECOMMISSIONED',
 }
 
+export enum ActorRole {
+  USER = 'USER',
+  ADMIN = 'ADMIN',
+  SYSTEM = 'SYSTEM',
+  MANAGER = 'MANAGER',
+  EMPLOYEE = 'EMPLOYEE',
+}
+
+

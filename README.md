@@ -42,6 +42,7 @@ emphrx-backend/
 │   ├── phase1-verify.ts                 /* Phase 1 integration verification script */
 │   ├── phase2-verify.ts                 /* Phase 2 integration verification script */
 │   ├── phase3-verify.ts                 /* Phase 3 integration verification script */
+│   ├── phase4-verify.ts                 /* Phase 4 integration verification script */
 │   ├── common/
 │   │   ├── filters/
 │   │   │   └── http-exception.filter.ts /* Global error catching & standard error envelope */
@@ -63,7 +64,8 @@ emphrx-backend/
 │           │   ├── regularization.controller.ts      /* Correction requests & manager approvals */
 │           │   ├── wfh.controller.ts                 /* WFH requests & manager approvals */
 │           │   ├── attendance-setting.controller.ts  /* Organization attendance settings & rules */
-│           │   └── attendance-device.controller.ts   /* Hardware terminals & batch punch push */
+│           │   ├── attendance-device.controller.ts   /* Hardware terminals & batch punch push */
+│           │   └── attendance-analytics.controller.ts/* Analytics overview, CSV export, audit logs */
 │           ├── dto/
 │           │   ├── qr-session.dto.ts
 │           │   ├── qr-punch.dto.ts
@@ -73,7 +75,8 @@ emphrx-backend/
 │           │   ├── wfh.dto.ts
 │           │   ├── attendance-setting.dto.ts
 │           │   ├── attendance-query.dto.ts
-│           │   └── device.dto.ts                     /* Hardware terminal registration & batch DTOs */
+│           │   ├── device.dto.ts                     /* Hardware terminal registration & batch DTOs */
+│           │   └── analytics-export.dto.ts           /* Analytics overview & timesheet export DTOs */
 │           ├── enums/
 │           │   └── attendance.enums.ts
 │           ├── guards/
@@ -85,7 +88,8 @@ emphrx-backend/
 │           │   ├── attendance-regularization.repository.ts
 │           │   ├── attendance-wfh.repository.ts
 │           │   ├── attendance-setting.repository.ts
-│           │   └── attendance-device.repository.ts   /* Hardware terminal and enrollment mappings */
+│           │   ├── attendance-device.repository.ts   /* Hardware terminal and enrollment mappings */
+│           │   └── audit-log.repository.ts           /* Immutable compliance audit trail queries */
 │           ├── services/
 │           │   ├── attendance-capture.service.ts     /* UNIFIED INGESTION (QR, Geo, Bio, Manual) */
 │           │   ├── attendance-calculation.service.ts /* DAILY ROLLUP, OVERTIME & SHIFT SNAPSHOTS */
@@ -95,6 +99,9 @@ emphrx-backend/
 │           │   ├── attendance-setting.service.ts     /* Org rules, off days, and grace limits */
 │           │   ├── attendance-device.service.ts      /* Physical terminal lifecycle & heartbeat */
 │           │   ├── attendance-webhook.service.ts     /* Outbound webhooks & signature dispatch */
+│           │   ├── tier-entitlement.service.ts       /* Redis entitlement cache & plan feature gating */
+│           │   ├── attendance-analytics.service.ts   /* Aggregated attendance metrics & trends */
+│           │   ├── attendance-export.service.ts      /* Streaming timesheet CSV generation */
 │           │   ├── qr/
 │           │   │   └── qr-session.service.ts         /* Dynamic QR tokens & Redis nonces */
 │           │   └── geolocation/
@@ -156,6 +163,11 @@ Interactive Swagger documentation is available locally at:
 * `POST /api/attendance/devices/heartbeat`: Periodic terminal hardware ping updating status and heartbeat timestamp.
 * `POST /api/attendance/devices/punch` (and `/api/attendance/device/punch`): High-throughput batch punch push endpoint authenticated via HMAC-SHA256 signature (`x-signature`, `x-timestamp`, `x-device-serial`) with duplicate deduplication and unmapped enrollment log isolation.
 
+#### Analytics, Exports & Audit Trail (`/api/attendance`)
+* `GET /api/attendance/analytics/overview`: High-level organizational attendance health, trends, and aggregate metrics.
+* `GET /api/attendance/export`: Downloadable streaming CSV timesheet report.
+* `GET /api/attendance/audit-logs`: Immutable compliance audit trail queries with filters.
+
 ---
 
 ## 4. Local Execution & Verification
@@ -175,6 +187,9 @@ node dist/phase2-verify.js
 
 # Phase 3 Verification (Biometric Terminals, HMAC Guard, Batch Ingestion, Overtime, Webhooks)
 node dist/phase3-verify.js
+
+# Phase 4 Verification (SaaS Quotas, Plan Feature Gating, Analytics, Streaming CSV, Audit Logs)
+node dist/phase4-verify.js
 ```
 
 ### 3. Start Development Server

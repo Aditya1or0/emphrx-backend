@@ -6,6 +6,7 @@ import { RegularizationController } from './controllers/regularization.controlle
 import { WfhController } from './controllers/wfh.controller.js';
 import { AttendanceSettingController } from './controllers/attendance-setting.controller.js';
 import { AttendanceDeviceController } from './controllers/attendance-device.controller.js';
+import { AttendanceAnalyticsController } from './controllers/attendance-analytics.controller.js';
 
 import { QrSessionService } from './services/qr/qr-session.service.js';
 import { GeofenceService } from './services/geolocation/geofence.service.js';
@@ -18,6 +19,9 @@ import { WfhService } from './services/wfh.service.js';
 import { AttendanceSettingService } from './services/attendance-setting.service.js';
 import { AttendanceDeviceService } from './services/attendance-device.service.js';
 import { AttendanceWebhookService } from './services/attendance-webhook.service.js';
+import { TierEntitlementService } from './services/tier-entitlement.service.js';
+import { AttendanceAnalyticsService } from './services/attendance-analytics.service.js';
+import { AttendanceExportService } from './services/attendance-export.service.js';
 
 import { AttendancePunchRepository } from './repositories/attendance-punch.repository.js';
 import { AttendanceRecordRepository } from './repositories/attendance-record.repository.js';
@@ -26,6 +30,7 @@ import { AttendanceRegularizationRepository } from './repositories/attendance-re
 import { AttendanceWfhRepository } from './repositories/attendance-wfh.repository.js';
 import { AttendanceSettingRepository } from './repositories/attendance-setting.repository.js';
 import { AttendanceDeviceRepository } from './repositories/attendance-device.repository.js';
+import { AuditLogRepository } from './repositories/audit-log.repository.js';
 import { DeviceHmacGuard } from './guards/device-hmac.guard.js';
 
 @Module({
@@ -37,6 +42,7 @@ import { DeviceHmacGuard } from './guards/device-hmac.guard.js';
     WfhController,
     AttendanceSettingController,
     AttendanceDeviceController,
+    AttendanceAnalyticsController,
   ],
   providers: [
     /* Domain Services */
@@ -51,6 +57,9 @@ import { DeviceHmacGuard } from './guards/device-hmac.guard.js';
     AttendanceSettingService,
     AttendanceDeviceService,
     AttendanceWebhookService,
+    TierEntitlementService,
+    AttendanceAnalyticsService,
+    AttendanceExportService,
 
     /* Security Guards */
     DeviceHmacGuard,
@@ -63,6 +72,7 @@ import { DeviceHmacGuard } from './guards/device-hmac.guard.js';
     AttendanceWfhRepository,
     AttendanceSettingRepository,
     AttendanceDeviceRepository,
+    AuditLogRepository,
   ],
   exports: [
     AttendanceCaptureService,
@@ -73,6 +83,9 @@ import { DeviceHmacGuard } from './guards/device-hmac.guard.js';
     AttendanceSettingService,
     AttendanceDeviceService,
     AttendanceWebhookService,
+    TierEntitlementService,
+    AttendanceAnalyticsService,
+    AttendanceExportService,
     AttendancePunchRepository,
     AttendanceRecordRepository,
     AttendanceLocationRepository,
@@ -80,6 +93,7 @@ import { DeviceHmacGuard } from './guards/device-hmac.guard.js';
     AttendanceWfhRepository,
     AttendanceSettingRepository,
     AttendanceDeviceRepository,
+    AuditLogRepository,
   ],
 })
 export class AttendanceModule {}

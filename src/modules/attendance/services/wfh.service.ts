@@ -7,7 +7,12 @@ import { PrismaService } from '../../../database/prisma.service.js';
 import { AttendanceWfhRepository } from '../repositories/attendance-wfh.repository.js';
 import { AttendanceSettingRepository } from '../repositories/attendance-setting.repository.js';
 import { CreateWfhDto, ActionWfhDto } from '../dto/wfh.dto.js';
-import { AttendanceStatus, AuditAction, RequestStatus } from '../enums/attendance.enums.js';
+import {
+  ActorRole,
+  AttendanceStatus,
+  AuditAction,
+  RequestStatus,
+} from '../enums/attendance.enums.js';
 
 @Injectable()
 export class WfhService {
@@ -119,7 +124,7 @@ export class WfhService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.APPROVE,
           entityName: 'AttendanceWfhRequest',
           entityId: id,
@@ -164,7 +169,7 @@ export class WfhService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.REJECT,
           entityName: 'AttendanceWfhRequest',
           entityId: id,

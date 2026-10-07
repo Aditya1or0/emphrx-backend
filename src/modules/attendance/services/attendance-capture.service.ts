@@ -9,11 +9,13 @@ import { RedisService } from '../../../common/redis/redis.service.js';
 import { QrSessionService } from './qr/qr-session.service.js';
 import { GeofenceService } from './geolocation/geofence.service.js';
 import { AttendanceQueueWorker } from '../workers/attendance-queue.worker.js';
+import { TierEntitlementService } from './tier-entitlement.service.js';
 import { QrPunchDto } from '../dto/qr-punch.dto.js';
 import { GeoPunchDto } from '../dto/geo-punch.dto.js';
 import { ManualPunchDto } from '../dto/manual-punch.dto.js';
 import { BiometricPunchLogDto } from '../dto/device.dto.js';
 import {
+  ActorRole,
   AuditAction,
   CaptureMethod,
   OutboxStatus,
@@ -39,6 +41,7 @@ export class AttendanceCaptureService {
     private readonly qrSessionService: QrSessionService,
     private readonly geofenceService: GeofenceService,
     private readonly queueWorker: AttendanceQueueWorker,
+    private readonly tierService: TierEntitlementService,
   ) {}
 
   /* Resolves the logical business attendance date for an employee */
@@ -161,6 +164,9 @@ export class AttendanceCaptureService {
     dto: GeoPunchDto,
     punchType: PunchType,
   ): Promise<PunchResult> {
+    /* 0. Enforce SaaS plan tier entitlement for Geolocation */
+    await this.tierService.enforceCaptureMethod(orgId, CaptureMethod.GEOLOCATION);
+
     /* 1. Validate coordinates against office radius via Haversine */
     const geoResult = await this.geofenceService.validateCoordinates(
       orgId,
@@ -307,7 +313,7 @@ export class AttendanceCaptureService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.CREATE,
           entityName: 'AttendancePunch',
           entityId: createdPunch.id,
@@ -367,6 +373,9 @@ export class AttendanceCaptureService {
     duplicatesCount: number;
     failedLogs: Array<{ logId: string; enrollmentId: string; reason: string }>;
   }> {
+    /* 0. Enforce SaaS plan tier entitlement for Biometric hardware channel */
+    await this.tierService.enforceCaptureMethod(orgId, CaptureMethod.BIOMETRIC_API);
+
     if (!logs || logs.length === 0) {
       return {
         receivedCount: 0,

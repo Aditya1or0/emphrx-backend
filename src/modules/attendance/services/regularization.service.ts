@@ -9,7 +9,7 @@ import { AttendanceRecordRepository } from '../repositories/attendance-record.re
 import { AttendanceSettingRepository } from '../repositories/attendance-setting.repository.js';
 import { AttendanceQueueWorker } from '../workers/attendance-queue.worker.js';
 import { CreateRegularizationDto, ActionRegularizationDto } from '../dto/regularization.dto.js';
-import { AuditAction, RequestStatus } from '../enums/attendance.enums.js';
+import { ActorRole, AuditAction, RequestStatus } from '../enums/attendance.enums.js';
 
 @Injectable()
 export class RegularizationService {
@@ -113,7 +113,7 @@ export class RegularizationService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.APPROVE,
           entityName: 'AttendanceRegularization',
           entityId: id,
@@ -167,7 +167,7 @@ export class RegularizationService {
         data: {
           orgId,
           actorId,
-          actorRole: 'USER',
+          actorRole: ActorRole.USER,
           action: AuditAction.REJECT,
           entityName: 'AttendanceRegularization',
           entityId: id,
